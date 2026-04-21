@@ -105,7 +105,7 @@ function CoinRain({ active, onDone }: { active: boolean; onDone: () => void }) {
 }
 
 /* ─── Triumph Overlay ─── */
-function TriumphOverlay({ prize, prizeEmoji, onClose }: { prize: number; prizeEmoji: string; onClose: () => void }) {
+function TriumphOverlay({ prize, prizeEmoji, onClose, mult }: { prize: number; prizeEmoji: string; onClose: () => void; mult?: number }) {
   return (
     <div
       onClick={onClose}
@@ -160,8 +160,13 @@ function TriumphOverlay({ prize, prizeEmoji, onClose }: { prize: number; prizeEm
           className="gold-text"
           style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "60px", fontWeight: 700, lineHeight: 1 }}
         >
-          +{prize.toLocaleString()} 🪙
+          {prize.toLocaleString()} 🪙
         </p>
+        {mult !== undefined && (
+          <p style={{ color: "#A78BFA", fontSize: "18px", marginTop: "8px", letterSpacing: "0.1em", fontWeight: 700 }}>
+            ×{mult.toFixed(2)} к ставке
+          </p>
+        )}
 
         <button
           className="luxury-btn"
@@ -324,109 +329,236 @@ function HomePage({ setPage }: { setPage: (p: Page) => void }) {
 }
 
 /* ─── Game Page ─── */
-function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: number) => void }) {
-  const [boxes, setBoxes] = useState<Box[]>(INITIAL_BOXES);
-  const [coinRain, setCoinRain] = useState(false);
-  const [triumph, setTriumph] = useState<{ prize: number; emoji: string } | null>(null);
-  const [totalWon, setTotalWon] = useState(0);
-  const openedCount = boxes.filter((b) => b.opened).length;
-  const [newBalance, setNewBalance] = useState(balance);
+const BET_PRESETS = [50, 100, 250, 500, 1000];
 
-  const handleSetBalance = useCallback((b: number) => {
-    setNewBalance(b);
-    setBalance(b);
-  }, [setBalance]);
+// Множители выигрыша: зависит от редкости (определяется случайно при открытии)
+function rollPrize(bet: number): { multiplier: number; rarity: Box["rarity"]; prize_emoji: string } {
+  const roll = Math.random();
+  if (roll < 0.50) return { multiplier: 0.5 + Math.random() * 0.9,   rarity: "common",    prize_emoji: "💰" };
+  if (roll < 0.80) return { multiplier: 1.2 + Math.random() * 1.3,   rarity: "rare",      prize_emoji: "💎" };
+  if (roll < 0.95) return { multiplier: 2.5 + Math.random() * 2.5,   rarity: "epic",      prize_emoji: "✨" };
+  return             { multiplier: 6   + Math.random() * 9,            rarity: "legendary", prize_emoji: "🏆" };
+}
+
+function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: number) => void }) {
+  const [boxes, setBoxes] = useState<Box[]>(INITIAL_BOXES.map(b => ({ ...b, prize: 0 })));
+  const [bet, setBet] = useState(100);
+  const [betInput, setBetInput] = useState("100");
+  const [coinRain, setCoinRain] = useState(false);
+  const [triumph, setTriumph] = useState<{ prize: number; emoji: string; mult: number } | null>(null);
+  const [sessionProfit, setSessionProfit] = useState(0);
+  const [balanceRef, setBalanceRef] = useState(balance);
+  const openedCount = boxes.filter((b) => b.opened).length;
+
+  useEffect(() => { setBalanceRef(balance); }, [balance]);
+
+  const handleBetInput = (val: string) => {
+    setBetInput(val);
+    const num = parseInt(val, 10);
+    if (!isNaN(num) && num > 0) setBet(num);
+  };
 
   const openBox = useCallback((id: number) => {
     const box = boxes.find((b) => b.id === id);
     if (!box || box.opened || box.opening) return;
+    if (balanceRef < bet) return;
+
+    // Снимаем ставку
+    const afterBet = balanceRef - bet;
+    setBalance(afterBet);
+    setBalanceRef(afterBet);
 
     setBoxes((prev) => prev.map((b) => b.id === id ? { ...b, opening: true } : b));
 
     setTimeout(() => {
-      setBoxes((prev) => prev.map((b) => b.id === id ? { ...b, opened: true, opening: false } : b));
-      handleSetBalance(newBalance + box.prize);
-      setTotalWon((prev) => prev + box.prize);
+      const { multiplier, rarity, prize_emoji } = rollPrize(bet);
+      const prize = Math.round(bet * multiplier);
+      const afterPrize = afterBet + prize;
+      setBalance(afterPrize);
+      setBalanceRef(afterPrize);
+      setSessionProfit((prev) => prev + prize - bet);
+
+      setBoxes((prev) => prev.map((b) =>
+        b.id === id ? { ...b, opened: true, opening: false, prize, rarity, prize_emoji } : b
+      ));
+
       setCoinRain(true);
-      if (box.rarity === "legendary" || box.rarity === "epic") {
-        setTimeout(() => setTriumph({ prize: box.prize, emoji: box.prize_emoji }), 400);
+      if (rarity === "legendary" || rarity === "epic") {
+        setTimeout(() => setTriumph({ prize, emoji: prize_emoji, mult: multiplier }), 400);
       }
-    }, 600);
-  }, [boxes, newBalance, handleSetBalance]);
+    }, 650);
+  }, [boxes, bet, balanceRef, setBalance]);
 
   const resetBoxes = () => {
-    setBoxes(INITIAL_BOXES.map((b) => ({ ...b, opened: false, opening: false })));
-    setTotalWon(0);
+    setBoxes(INITIAL_BOXES.map(b => ({ ...b, prize: 0, opened: false, opening: false })));
+    setSessionProfit(0);
   };
 
+  const canOpen = balanceRef >= bet;
+
   return (
-    <div style={{ minHeight: "100vh", paddingTop: "96px", maxWidth: "1100px", margin: "0 auto", padding: "96px 16px 80px" }}>
-      <div className="animate-fade-in-up" style={{ textAlign: "center", marginBottom: "36px" }}>
+    <div style={{ minHeight: "100vh", maxWidth: "1100px", margin: "0 auto", padding: "96px 16px 80px" }}>
+      <div className="animate-fade-in-up" style={{ textAlign: "center", marginBottom: "28px" }}>
         <h2 className="gold-text" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "46px", fontWeight: 700, margin: 0 }}>
           Игровое поле
         </h2>
-        <p style={{ color: "#9CA3AF", letterSpacing: "0.06em", marginTop: "8px" }}>Выберите ящик и испытайте удачу</p>
+        <p style={{ color: "#9CA3AF", letterSpacing: "0.06em", marginTop: "8px" }}>Укажите ставку и откройте ящик</p>
+      </div>
+
+      {/* ── Ставка ── */}
+      <div className="velvet-card animate-fade-in-up" style={{
+        borderRadius: "20px", padding: "20px 24px", marginBottom: "28px",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: "14px",
+      }}>
+        <p style={{ color: "#9CA3AF", fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase", margin: 0 }}>
+          Ваша ставка за ящик
+        </p>
+
+        {/* Input */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "22px" }}>🪙</span>
+          <input
+            type="number"
+            min={1}
+            value={betInput}
+            onChange={(e) => handleBetInput(e.target.value)}
+            style={{
+              background: "rgba(201,168,76,0.07)",
+              border: "1px solid rgba(201,168,76,0.4)",
+              borderRadius: "12px",
+              color: "#F0D080",
+              fontFamily: "'Cormorant Garamond', serif",
+              fontSize: "28px", fontWeight: 700,
+              textAlign: "center",
+              width: "160px", padding: "8px 12px",
+              outline: "none",
+            }}
+          />
+          <span style={{ color: "#9CA3AF", fontSize: "13px" }}>монет</span>
+        </div>
+
+        {/* Presets */}
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+          {BET_PRESETS.map((p) => (
+            <button
+              key={p}
+              onClick={() => { setBet(p); setBetInput(String(p)); }}
+              style={{
+                padding: "6px 16px", borderRadius: "9999px", fontSize: "12px",
+                fontFamily: "'Montserrat', sans-serif", fontWeight: 700, cursor: "pointer",
+                letterSpacing: "0.06em",
+                background: bet === p ? "rgba(201,168,76,0.2)" : "transparent",
+                border: bet === p ? "1px solid rgba(201,168,76,0.7)" : "1px solid rgba(201,168,76,0.25)",
+                color: bet === p ? "var(--gold)" : "#9CA3AF",
+                transition: "all 0.2s",
+              }}
+            >
+              {p.toLocaleString()}
+            </button>
+          ))}
+        </div>
+
+        {!canOpen && (
+          <p style={{ color: "#CC4444", fontSize: "12px", margin: 0, letterSpacing: "0.06em" }}>
+            ⚠️ Недостаточно монет для ставки
+          </p>
+        )}
       </div>
 
       {/* Stats bar */}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "32px", justifyContent: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", justifyContent: "center", flexWrap: "wrap" }}>
         {[
           { label: "Открыто", value: `${openedCount} / ${boxes.length}` },
-          { label: "Выиграно за сессию", value: `${totalWon.toLocaleString()} 🪙` },
+          { label: "Прибыль за сессию", value: `${sessionProfit >= 0 ? "+" : ""}${sessionProfit.toLocaleString()} 🪙` },
         ].map((s, i) => (
-          <div key={i} className="velvet-card" style={{ borderRadius: "14px", padding: "10px 24px", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div key={i} className="velvet-card" style={{ borderRadius: "14px", padding: "8px 20px", display: "flex", alignItems: "center", gap: "10px" }}>
             <span style={{ color: "#9CA3AF", fontSize: "12px", letterSpacing: "0.08em" }}>{s.label}</span>
-            <span className="gold-text" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 700 }}>{s.value}</span>
+            <span
+              className="gold-text"
+              style={{
+                fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 700,
+                color: i === 1 ? (sessionProfit >= 0 ? undefined : "#CC4444") : undefined,
+              }}
+            >
+              {s.value}
+            </span>
           </div>
         ))}
       </div>
 
       {/* Boxes grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "20px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "18px" }}>
         {boxes.map((box, idx) => {
           const rarity = RARITIES[box.rarity];
+          const isOpen = box.opened;
           return (
             <div
               key={box.id}
               className={`box-card velvet-card animate-fade-in-up ${box.opening ? "animate-box-open" : ""}`}
               style={{
-                borderRadius: "20px", padding: "20px 16px",
+                borderRadius: "20px", padding: "22px 14px",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
-                animationDelay: `${idx * 0.07}s`,
-                border: `1px solid ${box.opened ? "rgba(201,168,76,0.1)" : rarity.color + "55"}`,
-                boxShadow: box.opened ? "none" : `0 0 20px ${rarity.glow}, 0 4px 20px rgba(0,0,0,0.5)`,
-                opacity: box.opened ? 0.5 : 1,
-                cursor: box.opened ? "default" : "pointer",
+                animationDelay: `${idx * 0.06}s`,
+                border: `1px solid ${isOpen ? rarity.color + "44" : "rgba(201,168,76,0.22)"}`,
+                boxShadow: isOpen
+                  ? `0 0 18px ${rarity.glow}`
+                  : "0 4px 20px rgba(0,0,0,0.5), 0 0 30px rgba(201,168,76,0.08)",
+                opacity: isOpen ? 0.75 : (canOpen ? 1 : 0.6),
+                cursor: isOpen || !canOpen ? "default" : "pointer",
+                position: "relative", overflow: "hidden",
               }}
-              onClick={() => openBox(box.id)}
+              onClick={() => canOpen && openBox(box.id)}
             >
-              <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.12em", color: rarity.color, textTransform: "uppercase" }}>
-                {rarity.label}
-              </span>
-              <div style={{ fontSize: box.opened ? "46px" : "50px", transition: "all 0.3s", filter: box.opened ? "grayscale(0.5)" : "none" }}>
-                {box.opened ? box.prize_emoji : box.emoji}
-              </div>
-              <div style={{ textAlign: "center" }}>
-                <div style={{ color: box.opened ? "#6B7280" : "#F5E6C8", fontSize: "13px", fontWeight: 600, letterSpacing: "0.04em", marginBottom: "4px" }}>
-                  {box.label}
-                </div>
-                <div
-                  className={box.opened ? "" : "gold-text"}
-                  style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 700, color: box.opened ? "#9CA3AF" : undefined }}
-                >
-                  {box.prize.toLocaleString()} 🪙
-                </div>
-              </div>
-              {box.opened && (
-                <span style={{ fontSize: "10px", color: "#6B7280", letterSpacing: "0.1em", textTransform: "uppercase" }}>Открыт</span>
+              {/* Shimmer overlay for unopened */}
+              {!isOpen && (
+                <div style={{
+                  position: "absolute", inset: 0, borderRadius: "20px",
+                  background: "linear-gradient(135deg, transparent 40%, rgba(201,168,76,0.04) 50%, transparent 60%)",
+                  backgroundSize: "200% 200%", animation: "shimmer 4s linear infinite",
+                  pointerEvents: "none",
+                }} />
               )}
+
+              {/* Box emoji — все одинаковые закрытые */}
+              <div style={{ fontSize: "52px", transition: "all 0.4s", filter: isOpen ? "none" : "drop-shadow(0 0 8px rgba(201,168,76,0.3))" }}>
+                {isOpen ? box.prize_emoji : "🎁"}
+              </div>
+
+              {/* Label */}
+              <div style={{ textAlign: "center" }}>
+                {isOpen ? (
+                  <>
+                    <div style={{ color: rarity.color, fontSize: "10px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "4px" }}>
+                      {rarity.label}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "'Cormorant Garamond', serif", fontSize: "22px", fontWeight: 700,
+                        color: box.prize >= bet ? "#68D391" : "#FC8181",
+                      }}
+                    >
+                      {box.prize >= bet ? "+" : ""}{(box.prize - bet).toLocaleString()} 🪙
+                    </div>
+                    <div style={{ color: "#9CA3AF", fontSize: "11px", marginTop: "2px" }}>
+                      выиграно {box.prize.toLocaleString()}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ color: "#C4B89A", fontSize: "13px", fontWeight: 600, letterSpacing: "0.04em", marginBottom: "2px" }}>
+                      Ящик #{box.id}
+                    </div>
+                    <div style={{ color: "#9CA3AF", fontSize: "11px" }}>Содержимое скрыто</div>
+                  </>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
 
       {openedCount > 0 && (
-        <div className="animate-fade-in-up" style={{ textAlign: "center", marginTop: "36px" }}>
+        <div className="animate-fade-in-up" style={{ textAlign: "center", marginTop: "32px" }}>
           <button
             onClick={resetBoxes}
             onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(201,168,76,0.1)")}
@@ -446,7 +578,13 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
       )}
 
       <CoinRain active={coinRain} onDone={() => setCoinRain(false)} />
-      {triumph && <TriumphOverlay prize={triumph.prize} prizeEmoji={triumph.emoji} onClose={() => setTriumph(null)} />}
+      {triumph && (
+        <TriumphOverlay
+          prize={triumph.prize}
+          prizeEmoji={triumph.emoji}
+          onClose={() => setTriumph(null)}
+        />
+      )}
     </div>
   );
 }
