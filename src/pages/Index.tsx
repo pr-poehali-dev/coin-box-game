@@ -481,6 +481,7 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
     ? chosenBoxes[0] === null ? 0 : chosenBoxes[1] === null ? 1 : null
     : null;
   const bothBoxesChosen = chosenBoxes[0] !== null && chosenBoxes[1] !== null;
+  const boxesMismatch = bothBoxesChosen && chosenBoxes[0] !== chosenBoxes[1];
 
   const confirmBet = (idx: number) => {
     const val = parseInt(players[idx].input, 10);
@@ -494,16 +495,21 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
 
   const chooseBox = (boxId: number) => {
     if (!bothBetsReady || duelState !== "betting" || nextChooser === null) return;
-    // Нельзя выбрать уже занятый ящик
-    if (chosenBoxes.includes(boxId)) return;
 
     const newChosen = [...chosenBoxes];
     newChosen[nextChooser] = boxId;
     setChosenBoxes(newChosen);
 
-    // Если оба выбрали — запускаем открытие
+    // Оба выбрали — проверяем совпадение
     if (nextChooser === 1) {
-      setTimeout(() => startOpening(newChosen as [number, number]), 400);
+      if (newChosen[0] === newChosen[1]) {
+        // Совпали — открываем
+        setTimeout(() => startOpening(newChosen as [number, number]), 500);
+      }
+      // Не совпали — оба перевыбирают (сбрасываем оба)
+      else {
+        setTimeout(() => setChosenBoxes([null, null]), 1200);
+      }
     }
   };
 
@@ -652,19 +658,33 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
       )}
 
       {/* ── Подсказка выбора ── */}
-      {duelState === "betting" && bothBetsReady && !bothBoxesChosen && (
+      {duelState === "betting" && bothBetsReady && (
         <div className="animate-fade-in-up" style={{ textAlign: "center", marginBottom: "16px" }}>
-          <div style={{
-            display: "inline-flex", alignItems: "center", gap: "10px",
-            padding: "10px 24px", borderRadius: "9999px",
-            background: `${players[nextChooser!].accentColor}18`,
-            border: `1px solid ${players[nextChooser!].accentColor}55`,
-          }}>
-            <span style={{ fontSize: "20px" }}>{players[nextChooser!].avatar}</span>
-            <span style={{ color: players[nextChooser!].accentColor, fontSize: "13px", fontWeight: 700, letterSpacing: "0.06em" }}>
-              {players[nextChooser!].name} — выберите свой ящик
-            </span>
-          </div>
+          {boxesMismatch ? (
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: "10px",
+              padding: "10px 24px", borderRadius: "9999px",
+              background: "rgba(239,68,68,0.12)",
+              border: "1px solid rgba(239,68,68,0.5)",
+            }}>
+              <span style={{ fontSize: "18px" }}>⚠️</span>
+              <span style={{ color: "#FC8181", fontSize: "13px", fontWeight: 700, letterSpacing: "0.06em" }}>
+                Ящики не совпали — выбирайте заново
+              </span>
+            </div>
+          ) : !bothBoxesChosen && nextChooser !== null ? (
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: "10px",
+              padding: "10px 24px", borderRadius: "9999px",
+              background: `${players[nextChooser].accentColor}18`,
+              border: `1px solid ${players[nextChooser].accentColor}55`,
+            }}>
+              <span style={{ fontSize: "20px" }}>{players[nextChooser].avatar}</span>
+              <span style={{ color: players[nextChooser].accentColor, fontSize: "13px", fontWeight: 700, letterSpacing: "0.06em" }}>
+                {players[nextChooser].name} — выберите ящик
+              </span>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -678,7 +698,7 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
             const chosenColor = p1chosen ? players[0].accentColor : p2chosen ? players[1].accentColor : null;
             const isOpening = openingAnim && isAnyChosen;
             const isTaken = chosenBoxes.includes(id);
-            const isClickable = bothBetsReady && nextChooser !== null && !isTaken && duelState === "betting";
+            const isClickable = bothBetsReady && nextChooser !== null && duelState === "betting";
 
             return (
               <div
@@ -697,7 +717,7 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
                   background: chosenColor
                     ? `linear-gradient(135deg, ${chosenColor}12 0%, #1E0C1A 60%)`
                     : undefined,
-                  opacity: !bothBetsReady ? 0.4 : isTaken && !isAnyChosen ? 0.35 : 1,
+                  opacity: !bothBetsReady ? 0.4 : 1,
                   cursor: isClickable ? "pointer" : "default",
                   position: "relative", overflow: "hidden",
                   transition: "all 0.3s ease",
