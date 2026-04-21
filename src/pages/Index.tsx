@@ -464,17 +464,23 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
     { name: "Игрок 1", bet: null, input: "", color: "#60A5FA", accentColor: "#60A5FA", avatar: "🔵" },
     { name: "Игрок 2", bet: null, input: "", color: "#F472B6", accentColor: "#F472B6", avatar: "🔴" },
   ]);
-  const [selectedBox, setSelectedBox] = useState<number | null>(null);
+  // chosenBoxes[0] — ящик игрока 1, chosenBoxes[1] — ящик игрока 2
+  const [chosenBoxes, setChosenBoxes] = useState<(number | null)[]>([null, null]);
   const [openingAnim, setOpeningAnim] = useState(false);
   const [result, setResult] = useState<{ winner: 0 | 1; prize_emoji: string; bank: number } | null>(null);
   const [coinRain, setCoinRain] = useState(false);
   const [triumph, setTriumph] = useState<{ prize: number; emoji: string; winnerName: string } | null>(null);
-  const [roundCount, setRoundCount] = useState(0);
 
-  const bothReady = players[0].bet !== null && players[1].bet !== null;
+  const bothBetsReady = players[0].bet !== null && players[1].bet !== null;
   const p1bet = players[0].bet ?? 0;
   const p2bet = players[1].bet ?? 0;
   const bank = p1bet + p2bet;
+
+  // Кто ещё не выбрал ящик (после подтверждения ставок)
+  const nextChooser: number | null = bothBetsReady
+    ? chosenBoxes[0] === null ? 0 : chosenBoxes[1] === null ? 1 : null
+    : null;
+  const bothBoxesChosen = chosenBoxes[0] !== null && chosenBoxes[1] !== null;
 
   const confirmBet = (idx: number) => {
     const val = parseInt(players[idx].input, 10);
@@ -486,15 +492,27 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
     setPlayers((prev) => prev.map((p, i) => i === idx ? { ...p, input: val } : p));
   };
 
-  const openBox = (boxId: number) => {
-    if (!bothReady || duelState !== "betting") return;
-    setSelectedBox(boxId);
+  const chooseBox = (boxId: number) => {
+    if (!bothBetsReady || duelState !== "betting" || nextChooser === null) return;
+    // Нельзя выбрать уже занятый ящик
+    if (chosenBoxes.includes(boxId)) return;
+
+    const newChosen = [...chosenBoxes];
+    newChosen[nextChooser] = boxId;
+    setChosenBoxes(newChosen);
+
+    // Если оба выбрали — запускаем открытие
+    if (nextChooser === 1) {
+      setTimeout(() => startOpening(newChosen as [number, number]), 400);
+    }
+  };
+
+  const startOpening = (chosen: [number, number]) => {
     setDuelState("opening");
     setOpeningAnim(true);
 
     setTimeout(() => {
       setOpeningAnim(false);
-      // Побеждает тот, кто поставил больше; при равенстве — случайный
       let winnerIdx: 0 | 1;
       if (p1bet > p2bet) winnerIdx = 0;
       else if (p2bet > p1bet) winnerIdx = 1;
@@ -508,14 +526,11 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
       setCoinRain(true);
 
       const winnerName = players[winnerIdx].name;
-      const isBigWin = bank >= 500;
-      if (isBigWin) {
+      if (bank >= 500) {
         setTimeout(() => setTriumph({ prize: bank, emoji: prize_emoji, winnerName }), 500);
       }
-
-      // Обновляем баланс победителя (упрощённо — общий баланс)
       setBalance(balance + bank);
-    }, 1200);
+    }, 1400);
   };
 
   const newRound = () => {
@@ -523,10 +538,9 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
       { name: "Игрок 1", bet: null, input: "", color: "#60A5FA", accentColor: "#60A5FA", avatar: "🔵" },
       { name: "Игрок 2", bet: null, input: "", color: "#F472B6", accentColor: "#F472B6", avatar: "🔴" },
     ]);
-    setSelectedBox(null);
+    setChosenBoxes([null, null]);
     setResult(null);
     setDuelState("betting");
-    setRoundCount((r) => r + 1);
   };
 
   // 8 одинаковых ящиков
@@ -561,7 +575,7 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
       {/* ── Банк и статус ── */}
       {duelState === "betting" && (
         <div style={{ textAlign: "center", marginBottom: "28px" }}>
-          {bothReady ? (
+          {bothBetsReady ? (
             <div className="animate-fade-in-up">
               <div className="velvet-card" style={{
                 display: "inline-flex", flexDirection: "column", alignItems: "center",
@@ -582,13 +596,15 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
                     : "Равные ставки — решит жребий"}
                 </span>
               </div>
-              <p style={{ color: "var(--gold)", fontSize: "14px", letterSpacing: "0.08em" }}>
-                👇 Выберите ящик, чтобы открыть
-              </p>
+              {!bothBoxesChosen && (
+                <p style={{ color: "var(--gold)", fontSize: "14px", letterSpacing: "0.08em" }}>
+                  👇 Каждый игрок выбирает свой ящик
+                </p>
+              )}
             </div>
           ) : (
             <p style={{ color: "#9CA3AF", fontSize: "13px", letterSpacing: "0.06em" }}>
-              Ожидаем ставок: {players.filter(p => p.bet === null).map(p => p.name).join(" и ")}
+              Ожидаем ставок: {players.filter((p) => p.bet === null).map((p) => p.name).join(" и ")}
             </p>
           )}
         </div>
@@ -635,12 +651,35 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
         </div>
       )}
 
+      {/* ── Подсказка выбора ── */}
+      {duelState === "betting" && bothBetsReady && !bothBoxesChosen && (
+        <div className="animate-fade-in-up" style={{ textAlign: "center", marginBottom: "16px" }}>
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: "10px",
+            padding: "10px 24px", borderRadius: "9999px",
+            background: `${players[nextChooser!].accentColor}18`,
+            border: `1px solid ${players[nextChooser!].accentColor}55`,
+          }}>
+            <span style={{ fontSize: "20px" }}>{players[nextChooser!].avatar}</span>
+            <span style={{ color: players[nextChooser!].accentColor, fontSize: "13px", fontWeight: 700, letterSpacing: "0.06em" }}>
+              {players[nextChooser!].name} — выберите свой ящик
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ── Ящики ── */}
       {duelState !== "result" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
           {boxes.map((id, idx) => {
-            const isSelected = selectedBox === id;
-            const isOpening = openingAnim && isSelected;
+            const p1chosen = chosenBoxes[0] === id;
+            const p2chosen = chosenBoxes[1] === id;
+            const isAnyChosen = p1chosen || p2chosen;
+            const chosenColor = p1chosen ? players[0].accentColor : p2chosen ? players[1].accentColor : null;
+            const isOpening = openingAnim && isAnyChosen;
+            const isTaken = chosenBoxes.includes(id);
+            const isClickable = bothBetsReady && nextChooser !== null && !isTaken && duelState === "betting";
+
             return (
               <div
                 key={id}
@@ -649,33 +688,59 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
                   borderRadius: "20px", padding: "24px 14px",
                   display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
                   animationDelay: `${idx * 0.05}s`,
-                  border: isSelected
-                    ? "1px solid rgba(201,168,76,0.7)"
+                  border: chosenColor
+                    ? `2px solid ${chosenColor}`
                     : "1px solid rgba(201,168,76,0.18)",
-                  boxShadow: isSelected
-                    ? "0 0 40px rgba(201,168,76,0.3)"
-                    : "0 4px 20px rgba(0,0,0,0.4), 0 0 20px rgba(201,168,76,0.05)",
-                  opacity: bothReady ? 1 : 0.45,
-                  cursor: bothReady ? "pointer" : "default",
+                  boxShadow: chosenColor
+                    ? `0 0 30px ${chosenColor}55, 0 0 60px ${chosenColor}22`
+                    : "0 4px 20px rgba(0,0,0,0.4)",
+                  background: chosenColor
+                    ? `linear-gradient(135deg, ${chosenColor}12 0%, #1E0C1A 60%)`
+                    : undefined,
+                  opacity: !bothBetsReady ? 0.4 : isTaken && !isAnyChosen ? 0.35 : 1,
+                  cursor: isClickable ? "pointer" : "default",
                   position: "relative", overflow: "hidden",
+                  transition: "all 0.3s ease",
                 }}
-                onClick={() => bothReady && openBox(id)}
+                onClick={() => isClickable && chooseBox(id)}
               >
-                {!isSelected && (
+                {/* Shimmer на свободных */}
+                {!isAnyChosen && (
                   <div style={{
                     position: "absolute", inset: 0, borderRadius: "20px",
                     background: "linear-gradient(135deg, transparent 40%, rgba(201,168,76,0.04) 50%, transparent 60%)",
                     animation: "shimmer 4s linear infinite", pointerEvents: "none",
                   }} />
                 )}
+
+                {/* Бейдж игрока на выбранном ящике */}
+                {isAnyChosen && (
+                  <div style={{
+                    position: "absolute", top: "8px", right: "8px",
+                    background: chosenColor!, borderRadius: "9999px",
+                    padding: "2px 8px", fontSize: "10px", fontWeight: 700,
+                    color: "#0E0610", letterSpacing: "0.06em",
+                  }}>
+                    {p1chosen ? players[0].name : players[1].name}
+                  </div>
+                )}
+
                 <div style={{
                   fontSize: "46px",
-                  filter: bothReady ? "drop-shadow(0 0 8px rgba(201,168,76,0.4))" : "none",
+                  filter: isAnyChosen
+                    ? `drop-shadow(0 0 12px ${chosenColor})`
+                    : bothBetsReady ? "drop-shadow(0 0 6px rgba(201,168,76,0.3))" : "none",
                   transition: "all 0.4s",
                 }}>
-                  {isSelected && !openingAnim ? "✨" : "🎁"}
+                  {isOpening ? "✨" : "🎁"}
                 </div>
-                <div style={{ color: "#9CA3AF", fontSize: "11px", letterSpacing: "0.06em" }}>
+
+                <div style={{
+                  color: chosenColor ?? "#9CA3AF",
+                  fontSize: "11px", letterSpacing: "0.06em",
+                  fontWeight: isAnyChosen ? 700 : 400,
+                  transition: "color 0.3s",
+                }}>
                   Ящик #{id}
                 </div>
               </div>
@@ -684,7 +749,7 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
         </div>
       )}
 
-      {!bothReady && duelState === "betting" && (
+      {!bothBetsReady && duelState === "betting" && (
         <p style={{ textAlign: "center", color: "#4B5563", fontSize: "12px", marginTop: "20px", letterSpacing: "0.06em" }}>
           Ящики станут активны после ставок обоих игроков
         </p>
