@@ -105,7 +105,7 @@ function CoinRain({ active, onDone }: { active: boolean; onDone: () => void }) {
 }
 
 /* ─── Triumph Overlay ─── */
-function TriumphOverlay({ prize, prizeEmoji, onClose, mult }: { prize: number; prizeEmoji: string; onClose: () => void; mult?: number }) {
+function TriumphOverlay({ prize, prizeEmoji, onClose, mult, winnerName }: { prize: number; prizeEmoji: string; onClose: () => void; mult?: number; winnerName?: string }) {
   return (
     <div
       onClick={onClose}
@@ -155,7 +155,9 @@ function TriumphOverlay({ prize, prizeEmoji, onClose, mult }: { prize: number; p
         >
           ПОБЕДА!
         </h2>
-        <p style={{ color: "#F5E6C8", fontSize: "16px", marginBottom: "8px", letterSpacing: "0.1em" }}>Вы выиграли</p>
+        <p style={{ color: "#F5E6C8", fontSize: "16px", marginBottom: "8px", letterSpacing: "0.1em" }}>
+          {winnerName ? `${winnerName} побеждает!` : "Вы выиграли"}
+        </p>
         <p
           className="gold-text"
           style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "60px", fontWeight: 700, lineHeight: 1 }}
@@ -331,250 +333,361 @@ function HomePage({ setPage }: { setPage: (p: Page) => void }) {
 /* ─── Game Page ─── */
 const BET_PRESETS = [50, 100, 250, 500, 1000];
 
-// Множители выигрыша: зависит от редкости (определяется случайно при открытии)
-function rollPrize(bet: number): { multiplier: number; rarity: Box["rarity"]; prize_emoji: string } {
-  const roll = Math.random();
-  if (roll < 0.50) return { multiplier: 0.5 + Math.random() * 0.9,   rarity: "common",    prize_emoji: "💰" };
-  if (roll < 0.80) return { multiplier: 1.2 + Math.random() * 1.3,   rarity: "rare",      prize_emoji: "💎" };
-  if (roll < 0.95) return { multiplier: 2.5 + Math.random() * 2.5,   rarity: "epic",      prize_emoji: "✨" };
-  return             { multiplier: 6   + Math.random() * 9,            rarity: "legendary", prize_emoji: "🏆" };
+type DuelState = "betting" | "opening" | "result";
+
+interface PlayerBet {
+  name: string;
+  bet: number | null;
+  input: string;
+  color: string;
+  accentColor: string;
+  avatar: string;
+}
+
+function BetSlot({
+  player,
+  locked,
+  onChange,
+  onConfirm,
+}: {
+  player: PlayerBet;
+  locked: boolean;
+  onChange: (val: string) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="velvet-card animate-fade-in-up"
+      style={{
+        borderRadius: "24px", padding: "28px 24px",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: "14px",
+        border: locked
+          ? `1px solid ${player.accentColor}88`
+          : "1px solid rgba(201,168,76,0.22)",
+        boxShadow: locked ? `0 0 30px ${player.accentColor}33` : "none",
+        transition: "all 0.4s",
+        flex: 1, minWidth: "260px",
+      }}
+    >
+      {/* Avatar + name */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+        <div style={{
+          fontSize: "44px",
+          filter: locked ? `drop-shadow(0 0 10px ${player.accentColor})` : "none",
+          transition: "filter 0.4s",
+        }}>{player.avatar}</div>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 700,
+          color: locked ? player.accentColor : "#F5E6C8",
+          letterSpacing: "0.06em",
+        }}>{player.name}</div>
+      </div>
+
+      {locked ? (
+        /* Ставка подтверждена */
+        <div style={{ textAlign: "center" }}>
+          <div style={{ color: "#9CA3AF", fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>
+            Ставка принята
+          </div>
+          <div style={{
+            fontFamily: "'Cormorant Garamond', serif", fontSize: "36px", fontWeight: 700,
+            color: player.accentColor,
+          }}>
+            {player.bet!.toLocaleString()} 🪙
+          </div>
+          <div style={{ color: "#68D391", fontSize: "12px", marginTop: "6px", letterSpacing: "0.08em" }}>✓ Готов к игре</div>
+        </div>
+      ) : (
+        /* Форма ставки */
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "20px" }}>🪙</span>
+            <input
+              type="number"
+              min={1}
+              value={player.input}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder="0"
+              style={{
+                background: "rgba(201,168,76,0.06)",
+                border: `1px solid ${player.accentColor}66`,
+                borderRadius: "12px",
+                color: "#F0D080",
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: "26px", fontWeight: 700,
+                textAlign: "center",
+                width: "140px", padding: "8px 10px",
+                outline: "none",
+              }}
+            />
+          </div>
+
+          {/* Presets */}
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "center" }}>
+            {BET_PRESETS.map((p) => (
+              <button
+                key={p}
+                onClick={() => onChange(String(p))}
+                style={{
+                  padding: "5px 12px", borderRadius: "9999px", fontSize: "11px",
+                  fontFamily: "'Montserrat', sans-serif", fontWeight: 700, cursor: "pointer",
+                  background: player.input === String(p) ? `${player.accentColor}22` : "transparent",
+                  border: player.input === String(p) ? `1px solid ${player.accentColor}` : "1px solid rgba(201,168,76,0.2)",
+                  color: player.input === String(p) ? player.accentColor : "#9CA3AF",
+                  transition: "all 0.2s",
+                }}
+              >{p.toLocaleString()}</button>
+            ))}
+          </div>
+
+          <button
+            className="luxury-btn"
+            onClick={onConfirm}
+            disabled={!player.input || parseInt(player.input) <= 0}
+            style={{
+              padding: "10px 32px", borderRadius: "9999px", fontSize: "12px",
+              opacity: (!player.input || parseInt(player.input) <= 0) ? 0.4 : 1,
+              cursor: (!player.input || parseInt(player.input) <= 0) ? "not-allowed" : "pointer",
+            }}
+          >
+            Поставить
+          </button>
+        </>
+      )}
+    </div>
+  );
 }
 
 function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: number) => void }) {
-  const [boxes, setBoxes] = useState<Box[]>(INITIAL_BOXES.map(b => ({ ...b, prize: 0 })));
-  const [bet, setBet] = useState(100);
-  const [betInput, setBetInput] = useState("100");
+  const [duelState, setDuelState] = useState<DuelState>("betting");
+  const [players, setPlayers] = useState<PlayerBet[]>([
+    { name: "Игрок 1", bet: null, input: "", color: "#60A5FA", accentColor: "#60A5FA", avatar: "🔵" },
+    { name: "Игрок 2", bet: null, input: "", color: "#F472B6", accentColor: "#F472B6", avatar: "🔴" },
+  ]);
+  const [selectedBox, setSelectedBox] = useState<number | null>(null);
+  const [openingAnim, setOpeningAnim] = useState(false);
+  const [result, setResult] = useState<{ winner: 0 | 1; prize_emoji: string; bank: number } | null>(null);
   const [coinRain, setCoinRain] = useState(false);
-  const [triumph, setTriumph] = useState<{ prize: number; emoji: string; mult: number } | null>(null);
-  const [sessionProfit, setSessionProfit] = useState(0);
-  const [balanceRef, setBalanceRef] = useState(balance);
-  const openedCount = boxes.filter((b) => b.opened).length;
+  const [triumph, setTriumph] = useState<{ prize: number; emoji: string; winnerName: string } | null>(null);
+  const [roundCount, setRoundCount] = useState(0);
 
-  useEffect(() => { setBalanceRef(balance); }, [balance]);
+  const bothReady = players[0].bet !== null && players[1].bet !== null;
+  const p1bet = players[0].bet ?? 0;
+  const p2bet = players[1].bet ?? 0;
+  const bank = p1bet + p2bet;
 
-  const handleBetInput = (val: string) => {
-    setBetInput(val);
-    const num = parseInt(val, 10);
-    if (!isNaN(num) && num > 0) setBet(num);
+  const confirmBet = (idx: number) => {
+    const val = parseInt(players[idx].input, 10);
+    if (!val || val <= 0) return;
+    setPlayers((prev) => prev.map((p, i) => i === idx ? { ...p, bet: val } : p));
   };
 
-  const openBox = useCallback((id: number) => {
-    const box = boxes.find((b) => b.id === id);
-    if (!box || box.opened || box.opening) return;
-    if (balanceRef < bet) return;
+  const changeInput = (idx: number, val: string) => {
+    setPlayers((prev) => prev.map((p, i) => i === idx ? { ...p, input: val } : p));
+  };
 
-    // Снимаем ставку
-    const afterBet = balanceRef - bet;
-    setBalance(afterBet);
-    setBalanceRef(afterBet);
-
-    setBoxes((prev) => prev.map((b) => b.id === id ? { ...b, opening: true } : b));
+  const openBox = (boxId: number) => {
+    if (!bothReady || duelState !== "betting") return;
+    setSelectedBox(boxId);
+    setDuelState("opening");
+    setOpeningAnim(true);
 
     setTimeout(() => {
-      const { multiplier, rarity, prize_emoji } = rollPrize(bet);
-      const prize = Math.round(bet * multiplier);
-      const afterPrize = afterBet + prize;
-      setBalance(afterPrize);
-      setBalanceRef(afterPrize);
-      setSessionProfit((prev) => prev + prize - bet);
+      setOpeningAnim(false);
+      // Побеждает тот, кто поставил больше; при равенстве — случайный
+      let winnerIdx: 0 | 1;
+      if (p1bet > p2bet) winnerIdx = 0;
+      else if (p2bet > p1bet) winnerIdx = 1;
+      else winnerIdx = Math.random() < 0.5 ? 0 : 1;
 
-      setBoxes((prev) => prev.map((b) =>
-        b.id === id ? { ...b, opened: true, opening: false, prize, rarity, prize_emoji } : b
-      ));
+      const emojis = ["🏆", "👑", "💎", "🌟", "✨"];
+      const prize_emoji = emojis[Math.floor(Math.random() * emojis.length)];
 
+      setResult({ winner: winnerIdx, prize_emoji, bank });
+      setDuelState("result");
       setCoinRain(true);
-      if (rarity === "legendary" || rarity === "epic") {
-        setTimeout(() => setTriumph({ prize, emoji: prize_emoji, mult: multiplier }), 400);
-      }
-    }, 650);
-  }, [boxes, bet, balanceRef, setBalance]);
 
-  const resetBoxes = () => {
-    setBoxes(INITIAL_BOXES.map(b => ({ ...b, prize: 0, opened: false, opening: false })));
-    setSessionProfit(0);
+      const winnerName = players[winnerIdx].name;
+      const isBigWin = bank >= 500;
+      if (isBigWin) {
+        setTimeout(() => setTriumph({ prize: bank, emoji: prize_emoji, winnerName }), 500);
+      }
+
+      // Обновляем баланс победителя (упрощённо — общий баланс)
+      setBalance(balance + bank);
+    }, 1200);
   };
 
-  const canOpen = balanceRef >= bet;
+  const newRound = () => {
+    setPlayers([
+      { name: "Игрок 1", bet: null, input: "", color: "#60A5FA", accentColor: "#60A5FA", avatar: "🔵" },
+      { name: "Игрок 2", bet: null, input: "", color: "#F472B6", accentColor: "#F472B6", avatar: "🔴" },
+    ]);
+    setSelectedBox(null);
+    setResult(null);
+    setDuelState("betting");
+    setRoundCount((r) => r + 1);
+  };
+
+  // 8 одинаковых ящиков
+  const boxes = Array.from({ length: 8 }, (_, i) => i + 1);
 
   return (
-    <div style={{ minHeight: "100vh", maxWidth: "1100px", margin: "0 auto", padding: "96px 16px 80px" }}>
-      <div className="animate-fade-in-up" style={{ textAlign: "center", marginBottom: "28px" }}>
+    <div style={{ minHeight: "100vh", maxWidth: "1000px", margin: "0 auto", padding: "96px 16px 80px" }}>
+      <div className="animate-fade-in-up" style={{ textAlign: "center", marginBottom: "32px" }}>
         <h2 className="gold-text" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "46px", fontWeight: 700, margin: 0 }}>
-          Игровое поле
+          Дуэль
         </h2>
-        <p style={{ color: "#9CA3AF", letterSpacing: "0.06em", marginTop: "8px" }}>Укажите ставку и откройте ящик</p>
+        <p style={{ color: "#9CA3AF", letterSpacing: "0.06em", marginTop: "8px" }}>
+          Оба игрока делают ставку — побеждает тот, кто поставил больше
+        </p>
       </div>
 
-      {/* ── Ставка ── */}
-      <div className="velvet-card animate-fade-in-up" style={{
-        borderRadius: "20px", padding: "20px 24px", marginBottom: "28px",
-        display: "flex", flexDirection: "column", alignItems: "center", gap: "14px",
-      }}>
-        <p style={{ color: "#9CA3AF", fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase", margin: 0 }}>
-          Ваша ставка за ящик
-        </p>
-
-        {/* Input */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "22px" }}>🪙</span>
-          <input
-            type="number"
-            min={1}
-            value={betInput}
-            onChange={(e) => handleBetInput(e.target.value)}
-            style={{
-              background: "rgba(201,168,76,0.07)",
-              border: "1px solid rgba(201,168,76,0.4)",
-              borderRadius: "12px",
-              color: "#F0D080",
-              fontFamily: "'Cormorant Garamond', serif",
-              fontSize: "28px", fontWeight: 700,
-              textAlign: "center",
-              width: "160px", padding: "8px 12px",
-              outline: "none",
-            }}
-          />
-          <span style={{ color: "#9CA3AF", fontSize: "13px" }}>монет</span>
-        </div>
-
-        {/* Presets */}
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-          {BET_PRESETS.map((p) => (
-            <button
-              key={p}
-              onClick={() => { setBet(p); setBetInput(String(p)); }}
-              style={{
-                padding: "6px 16px", borderRadius: "9999px", fontSize: "12px",
-                fontFamily: "'Montserrat', sans-serif", fontWeight: 700, cursor: "pointer",
-                letterSpacing: "0.06em",
-                background: bet === p ? "rgba(201,168,76,0.2)" : "transparent",
-                border: bet === p ? "1px solid rgba(201,168,76,0.7)" : "1px solid rgba(201,168,76,0.25)",
-                color: bet === p ? "var(--gold)" : "#9CA3AF",
-                transition: "all 0.2s",
-              }}
-            >
-              {p.toLocaleString()}
-            </button>
+      {/* ── Слоты игроков ── */}
+      {duelState !== "result" && (
+        <div style={{ display: "flex", gap: "20px", marginBottom: "32px", flexWrap: "wrap", justifyContent: "center" }}>
+          {players.map((p, idx) => (
+            <BetSlot
+              key={idx}
+              player={p}
+              locked={p.bet !== null}
+              onChange={(val) => changeInput(idx, val)}
+              onConfirm={() => confirmBet(idx)}
+            />
           ))}
         </div>
+      )}
 
-        {!canOpen && (
-          <p style={{ color: "#CC4444", fontSize: "12px", margin: 0, letterSpacing: "0.06em" }}>
-            ⚠️ Недостаточно монет для ставки
-          </p>
-        )}
-      </div>
-
-      {/* Stats bar */}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", justifyContent: "center", flexWrap: "wrap" }}>
-        {[
-          { label: "Открыто", value: `${openedCount} / ${boxes.length}` },
-          { label: "Прибыль за сессию", value: `${sessionProfit >= 0 ? "+" : ""}${sessionProfit.toLocaleString()} 🪙` },
-        ].map((s, i) => (
-          <div key={i} className="velvet-card" style={{ borderRadius: "14px", padding: "8px 20px", display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ color: "#9CA3AF", fontSize: "12px", letterSpacing: "0.08em" }}>{s.label}</span>
-            <span
-              className="gold-text"
-              style={{
-                fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 700,
-                color: i === 1 ? (sessionProfit >= 0 ? undefined : "#CC4444") : undefined,
-              }}
-            >
-              {s.value}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Boxes grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "18px" }}>
-        {boxes.map((box, idx) => {
-          const rarity = RARITIES[box.rarity];
-          const isOpen = box.opened;
-          return (
-            <div
-              key={box.id}
-              className={`box-card velvet-card animate-fade-in-up ${box.opening ? "animate-box-open" : ""}`}
-              style={{
-                borderRadius: "20px", padding: "22px 14px",
-                display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
-                animationDelay: `${idx * 0.06}s`,
-                border: `1px solid ${isOpen ? rarity.color + "44" : "rgba(201,168,76,0.22)"}`,
-                boxShadow: isOpen
-                  ? `0 0 18px ${rarity.glow}`
-                  : "0 4px 20px rgba(0,0,0,0.5), 0 0 30px rgba(201,168,76,0.08)",
-                opacity: isOpen ? 0.75 : (canOpen ? 1 : 0.6),
-                cursor: isOpen || !canOpen ? "default" : "pointer",
-                position: "relative", overflow: "hidden",
-              }}
-              onClick={() => canOpen && openBox(box.id)}
-            >
-              {/* Shimmer overlay for unopened */}
-              {!isOpen && (
-                <div style={{
-                  position: "absolute", inset: 0, borderRadius: "20px",
-                  background: "linear-gradient(135deg, transparent 40%, rgba(201,168,76,0.04) 50%, transparent 60%)",
-                  backgroundSize: "200% 200%", animation: "shimmer 4s linear infinite",
-                  pointerEvents: "none",
-                }} />
-              )}
-
-              {/* Box emoji — все одинаковые закрытые */}
-              <div style={{ fontSize: "52px", transition: "all 0.4s", filter: isOpen ? "none" : "drop-shadow(0 0 8px rgba(201,168,76,0.3))" }}>
-                {isOpen ? box.prize_emoji : "🎁"}
+      {/* ── Банк и статус ── */}
+      {duelState === "betting" && (
+        <div style={{ textAlign: "center", marginBottom: "28px" }}>
+          {bothReady ? (
+            <div className="animate-fade-in-up">
+              <div className="velvet-card" style={{
+                display: "inline-flex", flexDirection: "column", alignItems: "center",
+                gap: "6px", borderRadius: "20px", padding: "16px 36px",
+                border: "1px solid rgba(201,168,76,0.5)",
+                boxShadow: "0 0 30px rgba(201,168,76,0.15)",
+                marginBottom: "20px",
+              }}>
+                <span style={{ color: "#9CA3AF", fontSize: "11px", letterSpacing: "0.14em", textTransform: "uppercase" }}>Общий банк</span>
+                <span className="gold-text" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "40px", fontWeight: 700 }}>
+                  {bank.toLocaleString()} 🪙
+                </span>
+                <span style={{ color: "#9CA3AF", fontSize: "12px" }}>
+                  {p1bet > p2bet
+                    ? `Преимущество: ${players[0].name}`
+                    : p2bet > p1bet
+                    ? `Преимущество: ${players[1].name}`
+                    : "Равные ставки — решит жребий"}
+                </span>
               </div>
-
-              {/* Label */}
-              <div style={{ textAlign: "center" }}>
-                {isOpen ? (
-                  <>
-                    <div style={{ color: rarity.color, fontSize: "10px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "4px" }}>
-                      {rarity.label}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: "'Cormorant Garamond', serif", fontSize: "22px", fontWeight: 700,
-                        color: box.prize >= bet ? "#68D391" : "#FC8181",
-                      }}
-                    >
-                      {box.prize >= bet ? "+" : ""}{(box.prize - bet).toLocaleString()} 🪙
-                    </div>
-                    <div style={{ color: "#9CA3AF", fontSize: "11px", marginTop: "2px" }}>
-                      выиграно {box.prize.toLocaleString()}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ color: "#C4B89A", fontSize: "13px", fontWeight: 600, letterSpacing: "0.04em", marginBottom: "2px" }}>
-                      Ящик #{box.id}
-                    </div>
-                    <div style={{ color: "#9CA3AF", fontSize: "11px" }}>Содержимое скрыто</div>
-                  </>
-                )}
-              </div>
+              <p style={{ color: "var(--gold)", fontSize: "14px", letterSpacing: "0.08em" }}>
+                👇 Выберите ящик, чтобы открыть
+              </p>
             </div>
-          );
-        })}
-      </div>
-
-      {openedCount > 0 && (
-        <div className="animate-fade-in-up" style={{ textAlign: "center", marginTop: "32px" }}>
-          <button
-            onClick={resetBoxes}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(201,168,76,0.1)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            style={{
-              padding: "12px 32px", borderRadius: "9999px", fontSize: "13px",
-              background: "transparent", border: "1px solid rgba(201,168,76,0.4)",
-              color: "var(--gold)", cursor: "pointer",
-              fontFamily: "'Montserrat', sans-serif", fontWeight: 700,
-              letterSpacing: "0.12em", textTransform: "uppercase",
-              transition: "background 0.3s",
-            }}
-          >
-            🔄 Новый раунд
-          </button>
+          ) : (
+            <p style={{ color: "#9CA3AF", fontSize: "13px", letterSpacing: "0.06em" }}>
+              Ожидаем ставок: {players.filter(p => p.bet === null).map(p => p.name).join(" и ")}
+            </p>
+          )}
         </div>
+      )}
+
+      {/* ── Результат ── */}
+      {duelState === "result" && result && (
+        <div className="animate-triumph" style={{ textAlign: "center", marginBottom: "36px" }}>
+          <div className="velvet-card" style={{
+            borderRadius: "28px", padding: "32px 40px", display: "inline-block",
+            border: `1px solid ${players[result.winner].accentColor}66`,
+            boxShadow: `0 0 50px ${players[result.winner].accentColor}33`,
+          }}>
+            <div style={{ fontSize: "56px", marginBottom: "12px" }}>{result.prize_emoji}</div>
+            <div style={{
+              fontFamily: "'Cormorant Garamond', serif", fontSize: "16px",
+              color: "#9CA3AF", letterSpacing: "0.1em", marginBottom: "4px",
+            }}>ПОБЕДИТЕЛЬ</div>
+            <div style={{
+              fontFamily: "'Cormorant Garamond', serif", fontSize: "38px", fontWeight: 700,
+              color: players[result.winner].accentColor,
+            }}>
+              {players[result.winner].name}
+            </div>
+            <div className="gold-text" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "32px", fontWeight: 700, marginTop: "8px" }}>
+              +{result.bank.toLocaleString()} 🪙
+            </div>
+            <div style={{ display: "flex", gap: "20px", justifyContent: "center", marginTop: "16px", fontSize: "13px", color: "#9CA3AF" }}>
+              <span>{players[0].name}: {(players[0].bet ?? 0).toLocaleString()} 🪙</span>
+              <span style={{ color: "rgba(201,168,76,0.3)" }}>vs</span>
+              <span>{players[1].name}: {(players[1].bet ?? 0).toLocaleString()} 🪙</span>
+            </div>
+          </div>
+
+          <div style={{ marginTop: "24px" }}>
+            <button
+              className="luxury-btn"
+              onClick={newRound}
+              style={{ padding: "12px 40px", borderRadius: "9999px", fontSize: "13px" }}
+            >
+              🔄 Новый раунд
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Ящики ── */}
+      {duelState !== "result" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
+          {boxes.map((id, idx) => {
+            const isSelected = selectedBox === id;
+            const isOpening = openingAnim && isSelected;
+            return (
+              <div
+                key={id}
+                className={`box-card velvet-card animate-fade-in-up ${isOpening ? "animate-box-open" : ""}`}
+                style={{
+                  borderRadius: "20px", padding: "24px 14px",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
+                  animationDelay: `${idx * 0.05}s`,
+                  border: isSelected
+                    ? "1px solid rgba(201,168,76,0.7)"
+                    : "1px solid rgba(201,168,76,0.18)",
+                  boxShadow: isSelected
+                    ? "0 0 40px rgba(201,168,76,0.3)"
+                    : "0 4px 20px rgba(0,0,0,0.4), 0 0 20px rgba(201,168,76,0.05)",
+                  opacity: bothReady ? 1 : 0.45,
+                  cursor: bothReady ? "pointer" : "default",
+                  position: "relative", overflow: "hidden",
+                }}
+                onClick={() => bothReady && openBox(id)}
+              >
+                {!isSelected && (
+                  <div style={{
+                    position: "absolute", inset: 0, borderRadius: "20px",
+                    background: "linear-gradient(135deg, transparent 40%, rgba(201,168,76,0.04) 50%, transparent 60%)",
+                    animation: "shimmer 4s linear infinite", pointerEvents: "none",
+                  }} />
+                )}
+                <div style={{
+                  fontSize: "46px",
+                  filter: bothReady ? "drop-shadow(0 0 8px rgba(201,168,76,0.4))" : "none",
+                  transition: "all 0.4s",
+                }}>
+                  {isSelected && !openingAnim ? "✨" : "🎁"}
+                </div>
+                <div style={{ color: "#9CA3AF", fontSize: "11px", letterSpacing: "0.06em" }}>
+                  Ящик #{id}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!bothReady && duelState === "betting" && (
+        <p style={{ textAlign: "center", color: "#4B5563", fontSize: "12px", marginTop: "20px", letterSpacing: "0.06em" }}>
+          Ящики станут активны после ставок обоих игроков
+        </p>
       )}
 
       <CoinRain active={coinRain} onDone={() => setCoinRain(false)} />
@@ -582,6 +695,7 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
         <TriumphOverlay
           prize={triumph.prize}
           prizeEmoji={triumph.emoji}
+          winnerName={triumph.winnerName}
           onClose={() => setTriumph(null)}
         />
       )}
