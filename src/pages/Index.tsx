@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react";
 
 /* ─── Types ─── */
 type Page = "home" | "game" | "profile" | "rules";
@@ -491,6 +491,40 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
   const [coinRain, setCoinRain] = useState(false);
   const [triumph, setTriumph] = useState<{ prize: number; emoji: string; winnerName: string } | null>(null);
 
+  // FLIP-анимация сортировки
+  const boxRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const prevPositions = useRef<Record<number, DOMRect>>({});
+
+  // Сохраняем позиции ДО обновления
+  const snapPositions = useCallback(() => {
+    const snap: Record<number, DOMRect> = {};
+    for (const [id, el] of Object.entries(boxRefs.current)) {
+      if (el) snap[Number(id)] = el.getBoundingClientRect();
+    }
+    prevPositions.current = snap;
+  }, []);
+
+  // После обновления duelBoxes — воспроизводим FLIP
+  useLayoutEffect(() => {
+    const prev = prevPositions.current;
+    for (const [id, el] of Object.entries(boxRefs.current)) {
+      const nId = Number(id);
+      if (!el || !prev[nId]) continue;
+      const oldRect = prev[nId];
+      const newRect = el.getBoundingClientRect();
+      const dx = oldRect.left - newRect.left;
+      const dy = oldRect.top - newRect.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      el.style.transition = "none";
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+      requestAnimationFrame(() => {
+        el.style.transition = "transform 0.5s cubic-bezier(0.4,0,0.2,1)";
+        el.style.transform = "translate(0,0)";
+      });
+    }
+    prevPositions.current = {};
+  }, [duelBoxes]);
+
   const bothBetsReady = players[0].bet !== null && players[1].bet !== null;
   const p1bet = players[0].bet ?? 0;
   const p2bet = players[1].bet ?? 0;
@@ -554,7 +588,8 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
         isNew: true,
       };
 
-      // Заменяем открытый ящик на новый, сортируем по призу (убывание)
+      // Сохраняем позиции ДО сортировки, затем обновляем
+      snapPositions();
       setDuelBoxes((prev) =>
         [...prev.filter((b) => b.id !== boxId), newBox]
           .sort((a, b) => b.prize - a.prize)
@@ -744,6 +779,7 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
             return (
               <div
                 key={box.id}
+                ref={(el) => { boxRefs.current[box.id] = el; }}
                 className={`box-card velvet-card ${box.isNew ? "animate-fade-in-up" : ""} ${isOpening ? "animate-box-open" : ""}`}
                 style={{
                   borderRadius: "20px", padding: "20px 12px 16px",
@@ -813,22 +849,17 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
                   {isOpening ? "✨" : BOX_EMOJIS[idx % BOX_EMOJIS.length]}
                 </div>
 
-                {/* Сумма выигрыша */}
+                {/* Приз скрыт — показываем ? */}
                 <div style={{
                   fontFamily: "'Cormorant Garamond', serif",
-                  fontSize: "17px", fontWeight: 700,
+                  fontSize: "22px", fontWeight: 700,
                   color: chosenColor ?? prizeColor,
-                  letterSpacing: "0.04em",
+                  letterSpacing: "0.1em",
                   transition: "color 0.3s",
+                  filter: "blur(0px)",
                 }}>
-                  {box.prize.toLocaleString()} 🪙
+                  ? ? ?
                 </div>
-
-                {box.accumulated > 0 && (
-                  <div style={{ fontSize: "9px", color: "rgba(201,168,76,0.6)", letterSpacing: "0.06em" }}>
-                    накоплено
-                  </div>
-                )}
               </div>
             );
           })}
