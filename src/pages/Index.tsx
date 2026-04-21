@@ -458,16 +458,36 @@ function BetSlot({
   );
 }
 
+/* ── DuelBox — ящик в дуэли ── */
+interface DuelBox {
+  id: number;
+  prize: number;       // сумма выигрыша внутри ящика
+  accumulated: number; // накоплено от прошлых ставок (0 у стартовых)
+  isNew: boolean;      // был только что создан (для анимации появления)
+}
+
+const BOX_EMOJIS = ["🎁", "📦", "🔮", "🎴", "👑", "🌟", "🐉", "💫", "🎰", "🎲"];
+
+function makeInitialDuelBoxes(): DuelBox[] {
+  const prizes = [50, 120, 250, 500, 750, 1000, 1500, 2500];
+  return prizes
+    .map((prize, i) => ({ id: i + 1, prize, accumulated: 0, isNew: false }))
+    .sort((a, b) => b.prize - a.prize);
+}
+
+let nextBoxId = 100;
+
 function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: number) => void }) {
   const [duelState, setDuelState] = useState<DuelState>("betting");
   const [players, setPlayers] = useState<PlayerBet[]>([
     { name: "Игрок 1", bet: null, input: "", color: "#60A5FA", accentColor: "#60A5FA", avatar: "🔵" },
     { name: "Игрок 2", bet: null, input: "", color: "#F472B6", accentColor: "#F472B6", avatar: "🔴" },
   ]);
-  // chosenBoxes[0] — ящик игрока 1, chosenBoxes[1] — ящик игрока 2
+  const [duelBoxes, setDuelBoxes] = useState<DuelBox[]>(makeInitialDuelBoxes);
+  // chosenBoxes[0] — id ящика игрока 1, chosenBoxes[1] — игрока 2
   const [chosenBoxes, setChosenBoxes] = useState<(number | null)[]>([null, null]);
   const [openingAnim, setOpeningAnim] = useState(false);
-  const [result, setResult] = useState<{ winner: 0 | 1; prize_emoji: string; bank: number } | null>(null);
+  const [result, setResult] = useState<{ winner: 0 | 1; prize_emoji: string; bank: number; openedPrize: number } | null>(null);
   const [coinRain, setCoinRain] = useState(false);
   const [triumph, setTriumph] = useState<{ prize: number; emoji: string; winnerName: string } | null>(null);
 
@@ -476,7 +496,6 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
   const p2bet = players[1].bet ?? 0;
   const bank = p1bet + p2bet;
 
-  // Кто ещё не выбрал ящик (после подтверждения ставок)
   const nextChooser: number | null = bothBetsReady
     ? chosenBoxes[0] === null ? 0 : chosenBoxes[1] === null ? 1 : null
     : null;
@@ -500,25 +519,25 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
     newChosen[nextChooser] = boxId;
     setChosenBoxes(newChosen);
 
-    // Оба выбрали — проверяем совпадение
     if (nextChooser === 1) {
       if (newChosen[0] === newChosen[1]) {
-        // Совпали — открываем
-        setTimeout(() => startOpening(newChosen as [number, number]), 500);
-      }
-      // Не совпали — оба перевыбирают (сбрасываем оба)
-      else {
+        setTimeout(() => startOpening(boxId), 500);
+      } else {
         setTimeout(() => setChosenBoxes([null, null]), 1200);
       }
     }
   };
 
-  const startOpening = (chosen: [number, number]) => {
+  const startOpening = (boxId: number) => {
     setDuelState("opening");
     setOpeningAnim(true);
 
     setTimeout(() => {
       setOpeningAnim(false);
+
+      const openedBox = duelBoxes.find((b) => b.id === boxId)!;
+      const openedPrize = openedBox.prize;
+
       let winnerIdx: 0 | 1;
       if (p1bet > p2bet) winnerIdx = 0;
       else if (p2bet > p1bet) winnerIdx = 1;
@@ -527,13 +546,27 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
       const emojis = ["🏆", "👑", "💎", "🌟", "✨"];
       const prize_emoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-      setResult({ winner: winnerIdx, prize_emoji, bank });
+      // Создаём новый ящик — приз = сумма ставок обоих игроков
+      const newBox: DuelBox = {
+        id: nextBoxId++,
+        prize: bank,
+        accumulated: bank,
+        isNew: true,
+      };
+
+      // Заменяем открытый ящик на новый, сортируем по призу (убывание)
+      setDuelBoxes((prev) =>
+        [...prev.filter((b) => b.id !== boxId), newBox]
+          .sort((a, b) => b.prize - a.prize)
+          .map((b) => b.id === newBox.id ? b : { ...b, isNew: false })
+      );
+
+      setResult({ winner: winnerIdx, prize_emoji, bank, openedPrize });
       setDuelState("result");
       setCoinRain(true);
 
-      const winnerName = players[winnerIdx].name;
       if (bank >= 500) {
-        setTimeout(() => setTriumph({ prize: bank, emoji: prize_emoji, winnerName }), 500);
+        setTimeout(() => setTriumph({ prize: bank, emoji: prize_emoji, winnerName: players[winnerIdx].name }), 500);
       }
       setBalance(balance + bank);
     }, 1400);
@@ -547,10 +580,9 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
     setChosenBoxes([null, null]);
     setResult(null);
     setDuelState("betting");
+    // Сбросить флаг isNew у всех ящиков
+    setDuelBoxes((prev) => prev.map((b) => ({ ...b, isNew: false })));
   };
-
-  // 8 одинаковых ящиков
-  const boxes = Array.from({ length: 8 }, (_, i) => i + 1);
 
   return (
     <div style={{ minHeight: "100vh", maxWidth: "1000px", margin: "0 auto", padding: "96px 16px 80px" }}>
@@ -638,6 +670,9 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
             <div className="gold-text" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "32px", fontWeight: 700, marginTop: "8px" }}>
               +{result.bank.toLocaleString()} 🪙
             </div>
+            <div style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px", letterSpacing: "0.06em" }}>
+              Приз ящика: {result.openedPrize.toLocaleString()} 🪙
+            </div>
             <div style={{ display: "flex", gap: "20px", justifyContent: "center", marginTop: "16px", fontSize: "13px", color: "#9CA3AF" }}>
               <span>{players[0].name}: {(players[0].bet ?? 0).toLocaleString()} 🪙</span>
               <span style={{ color: "rgba(201,168,76,0.3)" }}>vs</span>
@@ -691,40 +726,51 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
       {/* ── Ящики ── */}
       {duelState !== "result" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
-          {boxes.map((id, idx) => {
-            const p1chosen = chosenBoxes[0] === id;
-            const p2chosen = chosenBoxes[1] === id;
+          {duelBoxes.map((box, idx) => {
+            const p1chosen = chosenBoxes[0] === box.id;
+            const p2chosen = chosenBoxes[1] === box.id;
             const isAnyChosen = p1chosen || p2chosen;
             const chosenColor = p1chosen ? players[0].accentColor : p2chosen ? players[1].accentColor : null;
             const isOpening = openingAnim && isAnyChosen;
-            const isTaken = chosenBoxes.includes(id);
             const isClickable = bothBetsReady && nextChooser !== null && duelState === "betting";
+            const prizeColor = box.prize >= 2000
+              ? "#F0D080"
+              : box.prize >= 500
+              ? "#A78BFA"
+              : box.prize >= 200
+              ? "#60A5FA"
+              : "#9CA3AF";
 
             return (
               <div
-                key={id}
-                className={`box-card velvet-card animate-fade-in-up ${isOpening ? "animate-box-open" : ""}`}
+                key={box.id}
+                className={`box-card velvet-card ${box.isNew ? "animate-fade-in-up" : ""} ${isOpening ? "animate-box-open" : ""}`}
                 style={{
-                  borderRadius: "20px", padding: "24px 14px",
-                  display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
-                  animationDelay: `${idx * 0.05}s`,
+                  borderRadius: "20px", padding: "20px 12px 16px",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: "8px",
+                  animationDelay: box.isNew ? "0s" : `${idx * 0.04}s`,
                   border: chosenColor
                     ? `2px solid ${chosenColor}`
+                    : box.isNew
+                    ? "1px solid rgba(201,168,76,0.6)"
                     : "1px solid rgba(201,168,76,0.18)",
                   boxShadow: chosenColor
                     ? `0 0 30px ${chosenColor}55, 0 0 60px ${chosenColor}22`
+                    : box.isNew
+                    ? "0 0 30px rgba(201,168,76,0.25)"
                     : "0 4px 20px rgba(0,0,0,0.4)",
                   background: chosenColor
                     ? `linear-gradient(135deg, ${chosenColor}12 0%, #1E0C1A 60%)`
+                    : box.isNew
+                    ? "linear-gradient(135deg, rgba(201,168,76,0.08) 0%, #1E0C1A 60%)"
                     : undefined,
                   opacity: !bothBetsReady ? 0.4 : 1,
                   cursor: isClickable ? "pointer" : "default",
                   position: "relative", overflow: "hidden",
                   transition: "all 0.3s ease",
                 }}
-                onClick={() => isClickable && chooseBox(id)}
+                onClick={() => isClickable && chooseBox(box.id)}
               >
-                {/* Shimmer на свободных */}
                 {!isAnyChosen && (
                   <div style={{
                     position: "absolute", inset: 0, borderRadius: "20px",
@@ -733,7 +779,19 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
                   }} />
                 )}
 
-                {/* Бейдж игрока на выбранном ящике */}
+                {/* Бейдж «НОВЫЙ» */}
+                {box.isNew && !isAnyChosen && (
+                  <div style={{
+                    position: "absolute", top: "8px", left: "8px",
+                    background: "rgba(201,168,76,0.85)", borderRadius: "9999px",
+                    padding: "2px 7px", fontSize: "9px", fontWeight: 700,
+                    color: "#0E0610", letterSpacing: "0.08em",
+                  }}>
+                    НОВЫЙ
+                  </div>
+                )}
+
+                {/* Бейдж игрока */}
                 {isAnyChosen && (
                   <div style={{
                     position: "absolute", top: "8px", right: "8px",
@@ -746,23 +804,31 @@ function GamePage({ balance, setBalance }: { balance: number; setBalance: (b: nu
                 )}
 
                 <div style={{
-                  fontSize: "46px",
+                  fontSize: "40px",
                   filter: isAnyChosen
                     ? `drop-shadow(0 0 12px ${chosenColor})`
                     : bothBetsReady ? "drop-shadow(0 0 6px rgba(201,168,76,0.3))" : "none",
                   transition: "all 0.4s",
                 }}>
-                  {isOpening ? "✨" : "🎁"}
+                  {isOpening ? "✨" : BOX_EMOJIS[idx % BOX_EMOJIS.length]}
                 </div>
 
+                {/* Сумма выигрыша */}
                 <div style={{
-                  color: chosenColor ?? "#9CA3AF",
-                  fontSize: "11px", letterSpacing: "0.06em",
-                  fontWeight: isAnyChosen ? 700 : 400,
+                  fontFamily: "'Cormorant Garamond', serif",
+                  fontSize: "17px", fontWeight: 700,
+                  color: chosenColor ?? prizeColor,
+                  letterSpacing: "0.04em",
                   transition: "color 0.3s",
                 }}>
-                  Ящик #{id}
+                  {box.prize.toLocaleString()} 🪙
                 </div>
+
+                {box.accumulated > 0 && (
+                  <div style={{ fontSize: "9px", color: "rgba(201,168,76,0.6)", letterSpacing: "0.06em" }}>
+                    накоплено
+                  </div>
+                )}
               </div>
             );
           })}
